@@ -118,25 +118,28 @@ describe('404 handling', function() {
                 }
             }
         })
+        // TEMP: summary also needs update
+        .post('').reply(200, {
+            'batchcomplete': '',
+            'query': {
+                'pages': {
+                    '11089416': {
+                        'title': title,
+                        'extract': 'test'
+                    }
+                }
+            }
+        })
         // Other requests return nothing as if the page is deleted.
-        .post('')
-        .reply(200, emptyResponse)
-        .post('')
-        .reply(200, emptyResponse);
+        .post('').reply(200, emptyResponse)
+        .post('').reply(200, emptyResponse);
         // Fetch the page
         return preq.get({
-            uri: server.config.bucketURL + '/title/' + title,
-            headers: {
-                'cache-control': 'no-cache'
-            }
+            uri: server.config.bucketURL + '/html/' + title,
         })
         .then(function(res) {
             assert.deepEqual(res.status, 200);
-            assert.deepEqual(res.body.items.length, 1);
-            assert.deepEqual(res.body.items[0].rev, revision);
-        })
-        // Now fetch info that it's deleted
-        .then(function() {
+            // Now fetch info that it's deleted
             return preq.get({
                 uri: server.config.bucketURL + '/title/' + title,
                 headers: {
@@ -145,27 +148,27 @@ describe('404 handling', function() {
         })
         .then(function() {
             throw new Error('404 should have been returned for a deleted page');
-        })
-        .catch(function(e) {
+        }, function(e) {
             assert.deepEqual(e.status, 404);
             assert.contentType(e, 'application/problem+json');
-        })
-        // Getting it by revision id should also return 404
-        .then(function() {
+            // Getting it by revision id should also return 404
             return preq.get({uri: server.config.bucketURL + '/revision/' + revision});
         })
         .then(function() {
             throw new Error('404 should have been returned for a deleted page');
+        }, function(e) {
+            assert.deepEqual(e.status, 404);
+            assert.contentType(e, 'application/problem+json');
+            // Check that access is enforced to html
+            return preq.get({uri: server.config.bucketURL + '/html/' + title});
         })
-        .catch(function(e) {
+        .then(function() {
+            throw new Error('404 should have been returned for a deleted page');
+        }, function(e) {
             assert.deepEqual(e.status, 404);
             assert.contentType(e, 'application/problem+json');
         })
-        .then(function() {
-            api.done();
-        })
-        .finally(function() {
-            nock.cleanAll();
-        });
+        .then(function() { api.done(); })
+        .finally(function() { nock.cleanAll(); });
     })
 });

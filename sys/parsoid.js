@@ -14,6 +14,48 @@ var yaml = require('js-yaml');
 var fs = require('fs');
 var spec = yaml.safeLoad(fs.readFileSync(__dirname + '/parsoid.yaml'));
 
+function _toRestrictionArray(restriction) {
+    return ['sha1hidden', 'texthidden', 'userhidden', 'commenthidden']
+    .filter(function(key) { return restriction[key]; });
+}
+
+function checkAccess(restriction, content) {
+    var contentInfo = rbUtil.parseETag(content.headers.etag);
+    if (restriction && restriction.body && contentInfo) {
+        // Page is deleted
+        var deleteTid = restriction.body
+                && restriction.body.items
+                && restriction.body.items[0].page_deleted;
+        if (deleteTid) {
+            var deletionTime = uuid.fromString(deleteTid).getDate();
+            var revisionTime = uuid.fromString(contentInfo.tid).getDate();
+            if (revisionTime <= deletionTime) {
+                throw new rbUtil.HTTPError({
+                    status: 404,
+                    body: {
+                        type: 'not_found#page_revisions',
+                        description: 'Page was deleted'
+                    }
+                });
+            }
+        }
+
+        // Revision restricted
+        if (restriction.body.rev === contentInfo.rev
+                && (restriction.body.texthidden || restriction.body.sha1hidden)) {
+            throw new rbUtil.HTTPError({
+                status: 403,
+                body: {
+                    type: 'access_denied#revision',
+                    title: 'Access to resource denied',
+                    description: 'Access is restricted for revision ' + contentInfo.rev,
+                    restrictions: _toRestrictionArray(restriction)
+                }
+            });
+        }
+    }
+}
+
 // THIS IS EXPERIMENTAL AND ADDED FOR TESTING PURPOSE!
 // SHOULD BE REWRITTEN WHEN DEPENDENCY TRACKING SYSTEM IS IMPLEMENTED!
 var Purger = require('htcp-purge');
@@ -142,7 +184,11 @@ PSP.wrapContentReq = function(restbase, req, promise, format, tid, skipAccessChe
     if (!skipAccessCheck) {
         // Bundle the promise together with a call to getRevisionInfo(). A
         // failure in getRevisionInfo will abort the entire request.
-        reqs.revisionInfo = this.getRevisionInfo(restbase, req);
+        var restrictionUrl = [rp.domain, 'sys', 'access', 'restriction', rp.title];
+        if (rp.revision) {
+            restrictionUrl.push(rp.revision);
+        }
+        reqs.restrictions = restbase.get({ uri: new URI(restrictionUrl) });
     }
 
     // If the format is HTML and sections were requested, also request section
@@ -155,6 +201,8 @@ PSP.wrapContentReq = function(restbase, req, promise, format, tid, skipAccessChe
 
     return P.props(reqs)
     .then(function(responses) {
+        checkAccess(responses.restrictions, responses.content);
+
         // If we have reached this point, it means access is not denied, and
         // sections (if requested) were found
         if (format === 'html' && req.query.sections) {

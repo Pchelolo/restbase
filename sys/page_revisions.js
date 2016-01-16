@@ -20,7 +20,7 @@ var stringify = require('json-stable-stringify');
 var fs = require('fs');
 var yaml = require('js-yaml');
 var spec = yaml.safeLoad(fs.readFileSync(__dirname + '/page_revisions.yaml'));
-
+var P = require('bluebird');
 
 // Title Revision Service
 function PRS(options) {
@@ -292,13 +292,23 @@ PRS.prototype.fetchAndStoreMWRevision = function(restbase, req) {
             }
         })
         .catch({ status: 404 }, function() {
-            return restbase.put({ // Save / update the revision entry
-                uri: self.tableURI(rp.domain),
-                body: {
-                    table: self.tableName,
-                    attributes: revision
-                }
-            });
+            return P.join(
+                restbase.put({ // Save / update the revision entry
+                    uri: self.tableURI(rp.domain),
+                    body: {
+                        table: self.tableName,
+                        attributes: revision
+                    }
+                }),
+                restbase.put({ // Save / update the revision entry
+                    uri: new URI([rp.domain, 'sys', 'access',
+                            'restriction', revision.title, '' + revision.rev]),
+                    body: {
+                        table: self.tableName,
+                        attributes: restrictions
+                    }
+                })
+            );
         })
         .then(function() {
             self._checkRevReturn(revision);
@@ -366,17 +376,24 @@ PRS.prototype.getTitleRevision = function(restbase, req) {
                 return getLatestTitleRevision()
                 // In case 404 is returned by MW api, the page is deleted
                 .then(function(result) {
+                    var tid = uuid.now().toString();
                     result = result.body.items[0];
-                    result.tid = uuid.now().toString();
+                    result.tid = tid;
                     result.restrictions = result.restrictions || [];
                     result.restrictions.push('page_deleted');
-                    return restbase.put({
-                        uri: self.tableURI(rp.domain),
-                        body: {
-                            table: self.tableName,
-                            attributes: result
-                        }
-                    }).throw(e);
+                    return P.join(
+                        restbase.put({
+                            uri: self.tableURI(rp.domain),
+                            body: {
+                                table: self.tableName,
+                                attributes: result
+                            }
+                        }),
+                        restbase.put({
+                            uri: new URI([rp.domain, 'sys', 'access', 'deletion',
+                                result.title, '' + result.rev, tid])
+                        })
+                    ).throw(e);
                 });
             });
         } else {

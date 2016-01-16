@@ -68,3 +68,5 @@ paths:
       /pageviews:
         - path: sys/pageviews_proxy.yaml
           options: '{{options.pageviews}}'
+      /access:
+        - path: sys/page_suppression.js

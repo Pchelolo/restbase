@@ -94,3 +94,5 @@ paths:
       /mobileapps:
         - path: sys/mobileapps.yaml
           options: '{{options.mobileapps}}'
+      /access:
+        - path: sys/page_suppression.js
